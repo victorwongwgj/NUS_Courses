@@ -1,0 +1,30 @@
+{
+  "seed": 5208,
+  "trials": [
+    {
+      "trial": 1,
+      "inject_at_seconds": 1.107617,
+      "recovery_policy": "after_workload"
+    },
+    {
+      "trial": 2,
+      "inject_at_seconds": 1.202172,
+      "recovery_policy": "after_workload"
+    },
+    {
+      "trial": 3,
+      "inject_at_seconds": 1.489722,
+      "recovery_policy": "after_workload"
+    },
+    {
+      "trial": 4,
+      "inject_at_seconds": 1.027964,
+      "recovery_policy": "after_workload"
+    },
+    {
+      "trial": 5,
+      "inject_at_seconds": 1.147113,
+      "recovery_policy": "after_workload"
+    }
+  ]
+}
