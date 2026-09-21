@@ -1,0 +1,99 @@
+name: consistency-lab
+services:
+  mongo1:
+    build:
+      context: .
+      dockerfile: mongo-node/Dockerfile
+      args:
+        MONGO_IMAGE: ${MONGO_IMAGE:?Set MONGO_IMAGE in .env}
+    image: consistency-lab-mongo-node
+    cap_add: [NET_ADMIN]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.5"]
+    restart: "no"
+    cpus: 1.0
+    mem_limit: 1536m
+    volumes:
+      - mongo1-data:/data/db
+    networks:
+      replication:
+        aliases: [mongo1-rs]
+      client-access:
+        aliases: [mongo1-client]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  mongo2:
+    build:
+      context: .
+      dockerfile: mongo-node/Dockerfile
+      args:
+        MONGO_IMAGE: ${MONGO_IMAGE:?Set MONGO_IMAGE in .env}
+    image: consistency-lab-mongo-node
+    cap_add: [NET_ADMIN]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.5"]
+    restart: "no"
+    cpus: 1.0
+    mem_limit: 1536m
+    volumes:
+      - mongo2-data:/data/db
+    networks:
+      replication:
+        aliases: [mongo2-rs]
+      client-access:
+        aliases: [mongo2-client]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  mongo3:
+    build:
+      context: .
+      dockerfile: mongo-node/Dockerfile
+      args:
+        MONGO_IMAGE: ${MONGO_IMAGE:?Set MONGO_IMAGE in .env}
+    image: consistency-lab-mongo-node
+    cap_add: [NET_ADMIN]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.5"]
+    restart: "no"
+    cpus: 1.0
+    mem_limit: 1536m
+    volumes:
+      - mongo3-data:/data/db
+    networks:
+      replication:
+        aliases: [mongo3-rs]
+      client-access:
+        aliases: [mongo3-client]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  client:
+    build:
+      context: ./client
+    platform: linux/arm64
+    restart: "no"
+    cpus: 0.5
+    mem_limit: 512m
+    working_dir: /app
+    volumes:
+      - ./workload:/app
+      - ./code:/code:ro
+      - ./results:/results
+    environment:
+      MONGO_URI: "mongodb://mongo1:27017,mongo2:27017,mongo3:27017/lab?replicaSet=rs0"
+    networks:
+      - client-access
+volumes:
+  mongo1-data:
+  mongo2-data:
+  mongo3-data:
+networks:
+  replication:
+    name: consistency-lab-replication
+  client-access:
+    name: consistency-lab-client-access
