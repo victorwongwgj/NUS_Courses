@@ -1,0 +1,88 @@
+#!/bin/bash
+# implementation/jobs/vanda_cpu.pbs -- the ONE PBS job script for everything that runs on Vanda's CPU nodes (72 cores per node).
+#
+# It loads the modules, builds the programs, works out how to launch MPI across the allocated nodes, and then runs either
+#   (a) STUDIES: MPI studies of implementation/scripts/run_experiments.sh with the pure-MPI program (strong/weak scaling, exchange variants, placement, ...), or
+#   (b) SCRIPT : any helper script, e.g. implementation/scripts/cpu_studies.sh (serial timing studies, validation, official comparison) or implementation/scripts/prepare.sh.
+#
+# Resources are given on the qsub command line (the defaults below are 1 node / 72 cores); implementation/scripts/submit_all.sh lists the exact qsub line of every
+# result of the report.  Examples:
+#   qsub -l select=2:ncpus=72:mpiprocs=72:mem=200gb -l place=scatter:excl -l walltime=04:00:00 \
+#        -v STUDIES=E,PSLIST=1_2_4_8_16_32_64_128,N_STRONG=250000,EBOXES=400,EITERS=100,ROUNDS=3,RES=results_vcpu_E400 implementation/jobs/vanda_cpu.pbs
+#   qsub -l select=1:ncpus=1:mem=16gb -l walltime=03:00:00 -v SCRIPT=implementation/scripts/cpu_studies.sh,CMD=serial-base,BOXES=400_200,NAMES=g250k,ITERS=300 implementation/jobs/vanda_cpu.pbs
+#
+# Variables (-v; values must not contain commas or spaces: use '_' between numbers and '+' between names):
+#   STUDIES   studies of implementation/scripts/run_experiments.sh, '+'-separated                    [one of STUDIES / SCRIPT is required]
+#   SCRIPT    script to run instead (relative to the project directory); other -v variables are passed on (CMD, NAMES, BOXES, ...)
+#   PSLIST    rank counts, must be <= the cores requested (e.g. 1_2_4_8_16)          [1_2_4_8_16]
+#   ITERS REPS RES SEED NS N_STRONG N_PER_GPU NO_GEN GRID_FIXED ROUNDS EITERS EBOXES E_REP_MAXP FIXED_BOXES WEAK_N0_BOXES WEAK_VARIANTS (a+b) WEAK_ITERS
+#   WEAK_REP_REPS REAL REAL_BOXES REAL_ITERS GATE_PS GATE_QUICK GATE_N DATA SEEDS SAMPLE PEER_INTER LAYOUTS (place) BOXES (ablation/place)
+#   QGRID=<n> QFFT=distributed   (study quality: fixed grid of n boxes and the FFT variant)
+# Output: $RES/..., logs/cpu_<jobid>.log, logs/env_cpu_<jobid>.txt.
+#PBS -N tsne_cpu
+#PBS -j oe
+# HPC project (account): replace PROJECT_ID, or override it on the command line (`qsub -P <project>`; submit_all.sh does this with PROJECT=<project>)
+#PBS -P PROJECT_ID
+#PBS -l select=1:ncpus=72:mpiprocs=72:mem=200gb
+#PBS -l walltime=02:00:00
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+mkdir -p logs data
+exec > "logs/cpu_${PBS_JOBID:-local}.log" 2>&1
+set -x
+[ -n "${STUDIES:-}" ] || [ -n "${SCRIPT:-}" ] || { echo "set STUDIES=... or SCRIPT=..."; exit 2; }
+module purge || true
+module load gcc11/11.5.0 openmpi/gcc/64/4.1.8
+{ echo "job=${PBS_JOBID:-local} host=$(hostname) date=$(date -Is)"; lscpu | head -20; free -g | head -2; uptime
+  qstat -f "${PBS_JOBID:-0}" 2>/dev/null | grep -E "exec_(host|vnode)|Resource_List|queue"; sort -u "${PBS_NODEFILE:-/dev/null}"
+  g++ --version | head -1; mpirun --version 2>&1 | head -1; module list 2>&1; } > "logs/env_cpu_${PBS_JOBID:-local}.txt" 2>&1 || true
+[ -d /opt/pbs/lib ] && export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/opt/pbs/lib"   # Open MPI's PBS (tm) plugin needs libpbs.so.0
+export BUILD=${BUILD:-build}
+make cpu OMP=1 CXX=g++ BUILD="$BUILD" && make cpumpi CXX=g++ MPICXX=mpicxx BUILD="$BUILD" || exit 3
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+# (b) helper script, no MPI launch logic needed (scripts that use mpirun define their own default launcher)
+# ---------------------------------------------------------------------------------------------------------------------------------
+if [ -n "${SCRIPT:-}" ]; then
+  for v in BOXES NAMES; do [ -n "${!v:-}" ] && export "$v=${!v//_/ }"; done
+  export OMP_NUM_THREADS=${NCPUS:-1}   # prep-cpu / eval use OpenMP; the serial timing studies set OMP_NUM_THREADS=1 themselves
+  bash "$SCRIPT"
+  echo "== script rc=$? at $(date -Is)"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+# (a) MPI studies
+# ---------------------------------------------------------------------------------------------------------------------------------
+export PS="${PSLIST:-1_2_4_8_16}"; PS="${PS//_/ }"
+STUDIES="${STUDIES//+/ }"
+export ITERS=${ITERS:-500} REPS=${REPS:-3} RES=${RES:-results_vcpu} SEED=${SEED:-42}
+export BIN=$BUILD/tsne_mpi_cpu
+[ -n "${NS:-}" ] && export NS="${NS//_/ }"
+[ -n "${SEEDS:-}" ] && export SEEDS="${SEEDS//_/ }"
+for v in N_STRONG N_PER_GPU PEER_INTER DATA GRID_FIXED ROUNDS EITERS EBOXES NO_GEN SAMPLE FIXED_BOXES WEAK_N0_BOXES E_REP_MAXP REAL REAL_BOXES REAL_ITERS GATE_QUICK GATE_N WEAK_ITERS WEAK_REP_REPS LAYOUTS BOXES; do [ -n "${!v:-}" ] && export "$v"; done
+[ -n "${GATE_PS:-}" ] && export GATE_PS="${GATE_PS//_/ }"                       # gate: rank counts to test, e.g. GATE_PS=2_8_64_512
+[ -n "${WEAK_VARIANTS:-}" ] && export WEAK_VARIANTS="${WEAK_VARIANTS//+/,}"     # weak-scaling variants, e.g. sqrtgrid_fftdist+fixed_B1
+[ -n "${QGRID:-}" ] && export EXTRA="--grid-mode fixed --fixed-boxes $QGRID"
+[ -n "${QFFT:-}" ] && export EXTRA="${EXTRA:-} --fft $QFFT"
+
+# ---- MPI launch: slots = lines of $PBS_NODEFILE; one rank per core, bound to its core, filled node by node.
+NODES=$(sort -u "$PBS_NODEFILE" | wc -l); SLOTS=$(wc -l < "$PBS_NODEFILE")
+PMAX=0; for p in $PS; do [ "$p" -gt "$PMAX" ] && PMAX=$p; done
+[ "$PMAX" -le "$SLOTS" ] || { echo "FATAL: PSLIST needs $PMAX ranks but the job has $SLOTS slots"; exit 4; }
+export LAUNCH_BASE="mpirun --bind-to core"
+# does the (tm) launcher reach every allocated node?  (one rank per node must print NODES different host names)
+PLACED=$($LAUNCH_BASE --map-by ppr:1:node -np "$NODES" hostname 2>/dev/null | sort -u | wc -l || echo 0)
+if [ "$NODES" -gt 1 ] && [ "$PLACED" -lt "$NODES" ]; then
+  # no: fall back to an explicit host file and ssh launch
+  echo "TM launch reached $PLACED of $NODES nodes; falling back to hostfile + ssh"
+  HF="$PWD/logs/hosts_${PBS_JOBID:-local}.txt"; sort "$PBS_NODEFILE" | uniq -c | awk '{print $2" slots="$1}' > "$HF"
+  export LAUNCH_BASE="mpirun --hostfile $HF --mca plm rsh --prefix ${MPI_HOME:-/cm/shared/apps/openmpi4/gcc/4.1.8} -x LD_LIBRARY_PATH -x PATH --bind-to core"
+  PLACED=$($LAUNCH_BASE --map-by ppr:1:node -np "$NODES" hostname | sort -u | wc -l); echo "hostfile launch reached $PLACED nodes"
+  [ "$PLACED" -ge "$NODES" ] || { echo "FATAL: ranks do not reach every node"; exit 5; }
+fi
+export LAUNCH="$LAUNCH_BASE --map-by core -np"
+echo "nodes=$NODES slots=$SLOTS PS=$PS STUDIES=$STUDIES LAUNCH=$LAUNCH RES=$RES"
+mkdir -p "$RES"
+bash implementation/scripts/run_experiments.sh $STUDIES
+date

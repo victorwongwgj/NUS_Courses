@@ -1,0 +1,7 @@
+Stage (ms per iteration),16,32,64,128,256,512
+FFT compute,354,202,131,72,42,41
+Grid Reduce_scatter,47,65,86,90,119,102
+Two FFT transposes,18,21,17,18,68,53
+Potential Allgatherv,22,31,36,37,81,81
+Sum of the four stages,441,319,270,217,310,277
+Whole iteration,557,383,309,236,268,251

@@ -1,0 +1,5 @@
+Data set,cells,types,trustworthiness,kNN recall,label purity,purity of rare types
+ts10k,10000,142,0.9961,0.591,0.703,0.215
+ts50k,50000,156,0.9986,0.489,0.778,0.334
+ts200k,200000,160,0.9994,0.386,0.819,0.456
+ts (all),483152,160,0.9994,0.305,0.833,0.509

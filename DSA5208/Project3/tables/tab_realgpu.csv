@@ -1,0 +1,5 @@
+,One GPU,Two GPUs (ms),,Speed vs one GPU,
+Cells,(ms),blocking,non-blocking,blocking,non-blocking
+50k,34.6,60.3,86.7,0.57,0.40
+200k,41.1,63.5,86.7,0.65,0.47
+483k,53.8,69.2,90.6,0.78,0.59

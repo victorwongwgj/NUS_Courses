@@ -1,0 +1,6 @@
+,P=64,,,P=128,,
+Variant,Iter. (ms),Delta (%),Grid sum (ms),Iter. (ms),Delta (%),Grid sum (ms)
+Blocking,8320,-,174,8320,-,238
+Non-blocking,8372,+0.6,258,8552,+2.8,350
+"Non-blocking, polling",8372,+0.6,259,8622,+3.6,386
+Also non-blocking exchange,8374,+0.7,291,8569,+3.0,532

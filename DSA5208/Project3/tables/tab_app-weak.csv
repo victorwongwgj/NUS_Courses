@@ -1,0 +1,11 @@
+variant,P,rounds,time (s),efficiency
+fixed grid,1,2,0.7596,1.000
+fixed grid,16,2,0.7965,0.954
+fixed grid,64,2,0.9149,0.830
+fixed grid,128,2,0.9387,0.809
+fixed grid,256,2,0.9608,0.791
+grid growing with N,1,2,0.0241,1.000
+grid growing with N,16,2,0.0416,0.580
+grid growing with N,64,2,0.0918,0.263
+grid growing with N,128,2,0.1680,0.144
+grid growing with N,256,2,0.3386,0.071

@@ -1,0 +1,10 @@
+,One GPU,One node,,Two nodes,
+Stage (ms per iteration),"Distr., P=1",Replicated,Distributed,Replicated,Distributed
+Whole iteration,479,137,402,178,535
+FFT: row transforms (all of the FFT if replicated),12.7,47.1,6.6,47.1,6.6
+Column and inverse row transforms,41.4,-,20.7,-,20.7
+"Two transposes (copy to the host, Alltoall, copy back)",301,-,179,-,278
+Potential Allgatherv,30.2,-,53.9,-,68.5
+Kernel spectrum,74.3,5.9,41.4,5.9,61.8
+Grid Reduce_scatter,16.9,41.6,97.7,80.5,115
+GPU kernels waited for,118,81.9,64.3,81.9,64.3

@@ -1,0 +1,97 @@
+#!/bin/bash
+# implementation/jobs/vanda_gpu.pbs -- the ONE PBS job script for everything that needs Vanda's GPU nodes (A40, sm_86).
+#
+# It loads the modules, builds the programs (into $BUILD), sets up the MPI launcher and runs either
+#   (a) STUDIES: studies of implementation/scripts/run_experiments.sh with the MPI+CUDA program tsne_gpu (one rank per GPU), or
+#   (b) SCRIPT : any helper script, e.g. implementation/scripts/prepare.sh (GPU kNN graphs).
+#
+# Resources go on the qsub command line.  Default = 1 GPU (starts quickly).  Any 2-GPU request is rewritten by the Vanda server to a WHOLE node and may wait
+# for hours; batch_gpu allows at most 2 GPUs / 2 nodes per job, so PSLIST must not exceed 2:
+#   qsub -v STUDIES=gate,PSLIST=1                                                           implementation/jobs/vanda_gpu.pbs
+#   qsub -l select=1:ncpus=16:ngpus=2:mem=100gb -l walltime=03:00:00 -v STUDIES=A+B,PSLIST=2,GRID_FIXED=auto,RES=results_fx,NO_GEN=1   implementation/jobs/vanda_gpu.pbs
+#   qsub -l select=2:ncpus=8:ngpus=1:mem=32gb -l place=scatter -v STUDIES=A+B,PSLIST=2,MULTINODE=1,GRID_FIXED=auto,RES=results_fx_2n     implementation/jobs/vanda_gpu.pbs
+#   qsub -l walltime=03:00:00 -v SCRIPT=implementation/scripts/prepare.sh,CMD=big                           implementation/jobs/vanda_gpu.pbs
+#
+# Variables (-v; no commas or spaces in values; '_' between numbers, '+' between names):
+#   STUDIES   studies of implementation/scripts/run_experiments.sh: gate micro base pilot C A B Q quality float real realB1 samegrid hpcx_probe ...   [STUDIES or SCRIPT required]
+#   SCRIPT    script to run instead (relative to the project directory); other -v variables (CMD, NAMES, ...) are passed on
+#   MODULES   modules to load, '+'-separated   [gcc11/11.5.0+cuda12.4/toolkit/12.4.1+openmpi/gcc/64/4.1.8]; CUDA-aware runs: MODULES=nvhpc-hpcx-cuda12/26.1
+#   BUILD     build directory [build]; use a separate one (BUILD=build_hpcx) for the HPC-X build so that the two MPI libraries do not mix
+#   PSLIST    GPU counts (one rank per GPU; must be <= GPUs of the job, or 2 with MULTINODE=1)   [1]
+#   MULTINODE=1   2 ranks on 2 different nodes with one GPU each (select=2:ngpus=1 and -l place=scatter)
+#   ARCH=sm_86   ITERS=500 REPS=3 RES=results SEED=42 TRANSPORT=host|device   NS N_STRONG N_C N_PER_GPU REAL DATA SEEDS QS Q_EVAL RE GRID_FIXED ROUNDS EITERS NO_GEN
+#   GATE_TRANSPORTS=host_device (gate: also test the CUDA-aware transport)   PEER_INTER=<rank on another node>   CASES QCASES QSEEDS QITERS (samegrid)
+#   QGRID=<n> (study quality: fixed grid of n boxes)
+#   LAUNCH_CMD=<launcher incl. -np>  overrides the launcher;  MPI_XOPT=<mpirun -x options> overrides the UCX option of HPC-X.
+# Output: $RES/..., logs/gpu_<jobid>.log, logs/env_gpu_<jobid>.txt.
+#PBS -N tsne_gpu
+#PBS -j oe
+# HPC project (account): replace PROJECT_ID, or override it on the command line (`qsub -P <project>`; submit_all.sh does this with PROJECT=<project>)
+#PBS -P PROJECT_ID
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32gb
+#PBS -l walltime=04:00:00
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+mkdir -p logs data
+exec > "logs/gpu_${PBS_JOBID:-local}.log" 2>&1
+set -x
+[ -n "${STUDIES:-}" ] || [ -n "${SCRIPT:-}" ] || { echo "set STUDIES=... or SCRIPT=..."; exit 2; }
+module purge || true
+MODULES="${MODULES:-gcc11/11.5.0+cuda12.4/toolkit/12.4.1+openmpi/gcc/64/4.1.8}"
+for m in ${MODULES//+/ }; do module load "$m"; done
+EXM="${EXTRA_MODULES:-}"; for m in ${EXM//+/ }; do module load "$m"; done      # e.g. cuda12.4/nsight/12.4.1
+which g++ nvcc mpicxx mpirun || true
+{ echo "job=${PBS_JOBID:-local} host=$(hostname) date=$(date -Is)"; nvidia-smi -L; nvidia-smi topo -m;
+  nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv; nvcc --version | tail -2; module list 2>&1;
+  mpirun --version 2>&1 | head -2; ompi_info --parsable 2>/dev/null | grep -i "mpi_built_with_cuda_support"; } \
+  > "logs/env_gpu_${PBS_JOBID:-local}.txt" 2>&1 || true
+
+ARCH="${ARCH:-sm_86}"
+export BUILD=${BUILD:-build}
+make cpu OMP=1 CXX=g++ BUILD="$BUILD" || exit 3
+make gpu ARCH="$ARCH" CXX=g++ MPICXX=mpicxx BUILD="$BUILD" || exit 3                   # compile on the compute node (up to date => no work)
+case " ${STUDIES//+/ } " in *" float "*|*" samegrid "*) make gpu ARCH="$ARCH" CXX=g++ MPICXX=mpicxx BUILD="$BUILD" REAL=float || exit 3;; esac
+
+if [ -n "${SCRIPT:-}" ]; then
+  bash "$SCRIPT"
+  echo "== script rc=$? at $(date -Is)"
+  exit 0
+fi
+
+export PS="${PSLIST:-1}"; PS="${PS//_/ }"
+NGPU=$(nvidia-smi -L | wc -l)
+for p in $PS; do if [ -z "${MULTINODE:-}" ] && [ "$p" -gt "$NGPU" ]; then echo "FATAL: PSLIST has P=$p but only $NGPU GPU(s) visible; resubmit with -l select=1:ncpus=16:ngpus=2:mem=100gb"; exit 4; fi; done
+STUDIES="${STUDIES//+/ }"
+export ITERS=${ITERS:-500} REPS=${REPS:-3} RES=${RES:-results} SEED=${SEED:-42} TRANSPORT=${TRANSPORT:-host}
+export BIN=$BUILD/tsne_gpu BIN_FLOAT=$BUILD/tsne_gpu_float
+# HPC-X / NVHPC Open MPI cannot bind inside the PBS cpuset (hwloc_set_cpubind "Error"): do not bind for those modules
+BINDOPT=""; case "$MODULES" in *hpcx*|*NVHPC*) BINDOPT="--bind-to none";; esac
+# HPC-X multi-node: UCX finds no inter-node transport unless UCX_NET_DEVICES is set (UCX_NET_DEVICES=all works)
+XOPT="${MPI_XOPT-}"; [ -z "${MPI_XOPT+x}" ] && [ -n "$BINDOPT" ] && XOPT="-x UCX_NET_DEVICES=all"
+export LAUNCH_BASE="mpirun $BINDOPT"
+export LAUNCH="${LAUNCH_CMD:-$LAUNCH_BASE -np}"
+if [ -n "${MULTINODE:-}" ]; then   # one rank per node; the log must show two different hostnames
+  echo "MULTINODE nodefile:"; sort -u "${PBS_NODEFILE:-/dev/null}"
+  [ -d /opt/pbs/lib ] && export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/opt/pbs/lib"   # Open MPI's PBS (tm) plugin needs libpbs.so.0
+  export LAUNCH_BASE="mpirun $BINDOPT $XOPT --map-by ppr:1:node"; export LAUNCH="$LAUNCH_BASE -np"
+  if ! $LAUNCH 2 hostname; then
+    # fallback: explicit host file (one slot per node) + ssh launch; needs passwordless ssh between compute nodes
+    echo "TM launch failed; falling back to hostfile + ssh"
+    HF="$PWD/logs/hosts_${PBS_JOBID:-local}.txt"; sort -u "${PBS_NODEFILE:-/dev/null}" | sed 's/$/ slots=1/' > "$HF"
+    for h in $(awk '{print $1}' "$HF"); do ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$h" hostname || echo "WARNING: ssh to $h failed"; done
+    export LAUNCH_BASE="mpirun --hostfile $HF --mca plm rsh $BINDOPT $XOPT --map-by ppr:1:node --prefix ${MPI_HOME:-/cm/shared/apps/openmpi4/gcc/4.1.8} -x LD_LIBRARY_PATH -x PATH"
+    export LAUNCH="$LAUNCH_BASE -np"
+    $LAUNCH 2 hostname || echo "WARNING: mpirun could not place one rank on each node"
+  fi
+  echo "MULTINODE LAUNCH=$LAUNCH"
+fi
+[ -n "${NS:-}" ] && export NS="${NS//_/ }"
+[ -n "${SEEDS:-}" ] && export SEEDS="${SEEDS//_/ }"
+[ -n "${QS:-}" ] && export QS="${QS//_/ }"
+[ -n "${GATE_TRANSPORTS:-}" ] && export GATE_TRANSPORTS="${GATE_TRANSPORTS//_/ }"
+[ -n "${QGRID:-}" ] && export EXTRA="--grid-mode fixed --fixed-boxes $QGRID"
+for v in N_STRONG N_C N_PER_GPU REAL REAL_BOXES REAL_ITERS DATA PEER_INTER NO_GEN Q_EVAL SAMPLE GRID_FIXED ROUNDS EITERS EBOXES CASES QCASES QSEEDS QITERS MULTINODE; do [ -n "${!v:-}" ] && export "$v"; done
+echo "PS=$PS STUDIES=$STUDIES LAUNCH=$LAUNCH RES=$RES ARCH=$ARCH BUILD=$BUILD"
+mkdir -p "$RES"
+bash implementation/scripts/run_experiments.sh $STUDIES
+date

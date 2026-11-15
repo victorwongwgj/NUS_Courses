@@ -1,0 +1,6 @@
+,Replicated FFT,,Distributed FFT,
+Boxes,P=1,P=2,P=1,P=2
+2048,"577ms, 26.4GB","934ms, 25.5GB","3346ms, 36.1GB","2786ms, 21.2GB"
+2560,"1017ms, 40.0GB","1584ms, 39.1GB",fails,"4420ms, 32.5GB"
+2816,fails,"2585ms, 47.6GB",fails,"8284ms, 39.5GB"
+2944,-,fails,-,"6013ms, 44.1GB"

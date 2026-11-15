@@ -1,0 +1,11 @@
+Group,type,purity
+best,kidney epithelial cell,0.998
+best,luminal epithelial cell of mammary gland,0.992
+best,erythrocyte,0.988
+best,type II pneumocyte,0.987
+best,cardiac muscle cell,0.980
+worst,regulatory T cell,0.208
+worst,type I NK T cell,0.250
+worst,effector CD4 T cell,0.345
+worst,CD4 memory T cell,0.367
+worst,naive CD4 T cell,0.375

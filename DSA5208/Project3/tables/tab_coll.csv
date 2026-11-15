@@ -1,0 +1,4 @@
+P,ranks per node,Reduce_scatter,Allgather,Allreduce,Reduce_scatter + Allgather
+16,16,43.0,17.7,52.1,60.7
+64,64,71.4,23.6,83.2,95.0
+128,64,73.8,27.6,85.7,101.4

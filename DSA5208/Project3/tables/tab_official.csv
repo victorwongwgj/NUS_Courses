@@ -1,0 +1,4 @@
+,1 core (s),,72 cores (s),,Speed-up 72 vs. 1,
+Data,official,ours,official,ours,official,ours
+g50k,58.1,156.5,28.8,6.5,2.0,24.2
+ts50k,177.8,612.8,101.1,24.4,1.8,25.2

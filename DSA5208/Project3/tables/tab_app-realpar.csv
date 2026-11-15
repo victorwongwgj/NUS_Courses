@@ -1,0 +1,4 @@
+Run,trustworthiness,kNN recall,label purity,largest change of a type's purity
+P=1,0.9994,0.305,0.833,0.085 (between repeats)
+"P=2, one node",0.9994,0.305-0.306,0.833,0.041 (against P=1)
+"P=2, two nodes",0.9994,0.306,0.833,0.085 (against P=1)

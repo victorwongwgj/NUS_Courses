@@ -1,0 +1,5 @@
+,,One node,,Two nodes,
+MPI library,Transfers,blocking,non-blocking,blocking,non-blocking
+Open MPI,host-staged,161.2,195.8,201.0,219.8
+HPC-X,host-staged,181.0,156.2,178.2,153.6
+HPC-X,CUDA-aware,113.5,113.6,195.4,196.4

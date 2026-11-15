@@ -1,0 +1,5 @@
+Cells of a type,types,weighted purity
+fewer than 100,40,0.477
+100-1000,55,0.620
+1000-10000,48,0.775
+more than 10000,17,0.893

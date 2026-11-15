@@ -1,0 +1,5 @@
+GPUs,FFT,Seeds,Trustworthiness,KL
+one node,distributed,1,0.97968,5.19948
+one node,replicated,1,0.97940,5.19913
+two nodes,distributed,2,0.97966-0.97970,5.19867-5.19872
+two nodes,replicated,2,0.97966-0.97971,5.19902-5.19936
